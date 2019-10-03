@@ -419,7 +419,6 @@ func TestJWTSessionRSABearerInvalidTwoBears(t *testing.T) {
 
 func prepareJWTSessionRSAWithRawSourceOnWithClientID(isBench bool) string {
 	spec := BuildAndLoadAPI(func(spec *APISpec) {
-		spec.APIID = "777888"
 		spec.OrgID = "default"
 		spec.UseKeylessAccess = false
 		spec.EnableJWT = true
@@ -839,11 +838,12 @@ func TestJWTExistingSessionRSAWithRawSourceInvalidPolicyID(t *testing.T) {
 	LoadAPI(spec)
 
 	p1ID := CreatePolicy()
+	user_id := uuid.New()
 
 	jwtToken := CreateJWKToken(func(t *jwt.Token) {
 		t.Header["kid"] = "12345"
 		t.Claims.(jwt.MapClaims)["foo"] = "bar"
-		t.Claims.(jwt.MapClaims)["user_id"] = "user"
+		t.Claims.(jwt.MapClaims)["user_id"] = user_id
 		t.Claims.(jwt.MapClaims)["policy_id"] = p1ID
 		t.Claims.(jwt.MapClaims)["exp"] = time.Now().Add(time.Hour * 72).Unix()
 	})
@@ -859,7 +859,7 @@ func TestJWTExistingSessionRSAWithRawSourceInvalidPolicyID(t *testing.T) {
 	jwtTokenInvalidPolicy := CreateJWKToken(func(t *jwt.Token) {
 		t.Header["kid"] = "12345"
 		t.Claims.(jwt.MapClaims)["foo"] = "bar"
-		t.Claims.(jwt.MapClaims)["user_id"] = "user"
+		t.Claims.(jwt.MapClaims)["user_id"] = user_id
 		t.Claims.(jwt.MapClaims)["policy_id"] = "abcdef"
 		t.Claims.(jwt.MapClaims)["exp"] = time.Now().Add(time.Hour * 72).Unix()
 	})
@@ -902,6 +902,7 @@ func TestJWTScopeToPolicyMapping(t *testing.T) {
 		spec.JWTIdentityBaseField = "user_id"
 		spec.JWTPolicyFieldName = "policy_id"
 		spec.Proxy.ListenPath = "/api1"
+		spec.OrgID = "default"
 	})[0]
 
 	p1ID := CreatePolicy(func(p *user.Policy) {
@@ -928,6 +929,7 @@ func TestJWTScopeToPolicyMapping(t *testing.T) {
 		spec.JWTIdentityBaseField = "user_id"
 		spec.JWTPolicyFieldName = "policy_id"
 		spec.Proxy.ListenPath = "/api2"
+		spec.OrgID = "default"
 	})[0]
 
 	p2ID := CreatePolicy(func(p *user.Policy) {
@@ -954,6 +956,7 @@ func TestJWTScopeToPolicyMapping(t *testing.T) {
 		spec.JWTIdentityBaseField = "user_id"
 		spec.JWTPolicyFieldName = "policy_id"
 		spec.Proxy.ListenPath = "/api3"
+		spec.OrgID = "default"
 	})[0]
 
 	spec := BuildAPI(func(spec *APISpec) {
@@ -969,6 +972,7 @@ func TestJWTScopeToPolicyMapping(t *testing.T) {
 			"user:read":  p1ID,
 			"user:write": p2ID,
 		}
+		spec.OrgID = "default"
 	})[0]
 
 	LoadAPI(spec, spec1, spec2, spec3)
@@ -995,7 +999,7 @@ func TestJWTScopeToPolicyMapping(t *testing.T) {
 	})
 
 	// check that key has right set of policies assigned - there should be all three - base one and two from scope
-	sessionID := generateToken("", fmt.Sprintf("%x", md5.Sum([]byte(userID))))
+	sessionID := generateToken("default", fmt.Sprintf("%x", md5.Sum([]byte(userID))))
 	t.Run("Request to check that session has got correct apply_policies value", func(t *testing.T) {
 		ts.Run(
 			t,
@@ -1062,6 +1066,66 @@ func TestJWTScopeToPolicyMapping(t *testing.T) {
 			},
 		)
 	})
+
+	// try to change scope to policy mapping and request using existing session
+	p3ID := CreatePolicy(func(p *user.Policy) {
+		p.AccessRights = map[string]user.AccessDefinition{
+			spec3.APIID: {
+				Limit: &user.APILimit{
+					Rate:     500,
+					Per:      30,
+					QuotaMax: -1,
+				},
+			},
+		}
+		p.Partitions = user.PolicyPartitions{
+			PerAPI: true,
+		}
+	})
+
+	spec.JWTScopeToPolicyMapping = map[string]string{
+		"user:read": p3ID,
+	}
+
+	LoadAPI(spec)
+
+	t.Run("Request with changed scope in JWT and key with existing session", func(t *testing.T) {
+		ts.Run(t,
+			test.TestCase{
+				Headers: authHeaders,
+				Path:    "/base",
+				Code:    http.StatusOK,
+			})
+	})
+
+	// check that key has right set of policies assigned - there should be updated list (base one and one from scope)
+	t.Run("Request to check that session has got changed apply_policies value", func(t *testing.T) {
+		ts.Run(
+			t,
+			test.TestCase{
+				Method:    http.MethodGet,
+				Path:      "/tyk/keys/" + sessionID,
+				AdminAuth: true,
+				Code:      http.StatusOK,
+				BodyMatchFunc: func(body []byte) bool {
+					expectedResp := map[interface{}]bool{
+						basePolicyID: true,
+						p3ID:         true,
+					}
+
+					resp := map[string]interface{}{}
+					json.Unmarshal(body, &resp)
+					realResp := map[interface{}]bool{}
+					for _, val := range resp["apply_policies"].([]interface{}) {
+						realResp[val] = true
+					}
+
+					return reflect.DeepEqual(realResp, expectedResp)
+				},
+			},
+		)
+	})
+
 }
 
 func TestJWTExistingSessionRSAWithRawSourcePolicyIDChanged(t *testing.T) {
@@ -1076,6 +1140,7 @@ func TestJWTExistingSessionRSAWithRawSourcePolicyIDChanged(t *testing.T) {
 		spec.JWTIdentityBaseField = "user_id"
 		spec.JWTPolicyFieldName = "policy_id"
 		spec.Proxy.ListenPath = "/"
+		spec.OrgID = "default"
 	})[0]
 
 	LoadAPI(spec)
@@ -1086,16 +1151,17 @@ func TestJWTExistingSessionRSAWithRawSourcePolicyIDChanged(t *testing.T) {
 	p2ID := CreatePolicy(func(p *user.Policy) {
 		p.QuotaMax = 999
 	})
+	user_id := uuid.New()
 
 	jwtToken := CreateJWKToken(func(t *jwt.Token) {
 		t.Header["kid"] = "12345"
 		t.Claims.(jwt.MapClaims)["foo"] = "bar"
-		t.Claims.(jwt.MapClaims)["user_id"] = "user"
+		t.Claims.(jwt.MapClaims)["user_id"] = user_id
 		t.Claims.(jwt.MapClaims)["policy_id"] = p1ID
 		t.Claims.(jwt.MapClaims)["exp"] = time.Now().Add(time.Hour * 72).Unix()
 	})
 
-	sessionID := generateToken("", fmt.Sprintf("%x", md5.Sum([]byte("user"))))
+	sessionID := generateToken("default", fmt.Sprintf("%x", md5.Sum([]byte(user_id))))
 
 	authHeaders := map[string]string{"authorization": jwtToken}
 	t.Run("Initial request with 1st policy", func(t *testing.T) {
@@ -1120,7 +1186,7 @@ func TestJWTExistingSessionRSAWithRawSourcePolicyIDChanged(t *testing.T) {
 	jwtTokenAnotherPolicy := CreateJWKToken(func(t *jwt.Token) {
 		t.Header["kid"] = "12345"
 		t.Claims.(jwt.MapClaims)["foo"] = "bar"
-		t.Claims.(jwt.MapClaims)["user_id"] = "user"
+		t.Claims.(jwt.MapClaims)["user_id"] = user_id
 		t.Claims.(jwt.MapClaims)["policy_id"] = p2ID
 		t.Claims.(jwt.MapClaims)["exp"] = time.Now().Add(time.Hour * 72).Unix()
 	})

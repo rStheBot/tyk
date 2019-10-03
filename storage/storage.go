@@ -26,6 +26,7 @@ var ErrKeyNotFound = errors.New("key not found")
 // AuthorisationManager to read and write key values to the backend
 type Handler interface {
 	GetKey(string) (string, error) // Returned string is expected to be a JSON object (user.SessionState)
+	GetMultiKey([]string) ([]string, error)
 	GetRawKey(string) (string, error)
 	SetKey(string, string, int64) error // Second input string is expected to be a JSON object (user.SessionState)
 	SetRawKey(string, string, int64) error
@@ -33,6 +34,7 @@ type Handler interface {
 	GetExp(string) (int64, error) // Returns expiry of a key
 	GetKeys(string) []string
 	DeleteKey(string) bool
+	DeleteAllKeys() bool
 	DeleteRawKey(string) bool
 	Connect() bool
 	GetKeysAndValues() map[string]string

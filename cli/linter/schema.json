@@ -58,6 +58,32 @@
           "type": "string"
         }
       }
+    },
+    "PortWhiteList": {
+      "type": [
+        "object"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ranges": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "type": "integer"
+            },
+            "to": {
+              "type": "integer"
+            }
+          }
+        },
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        }
+      }
     }
   },
   "properties": {
@@ -227,6 +253,9 @@
           "type": "boolean"
         },
         "python_path_prefix": {
+          "type": "string"
+        },
+        "python_version": {
           "type": "string"
         }
       }
@@ -674,6 +703,30 @@
             "service",
             "rpc"
           ]
+        }
+      }
+    },
+    "disable_ports_whitelist": {
+      "type": "boolean"
+    },
+    "ports_whitelist": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "http": {
+          "$ref": "#/definitions/PortWhiteList"
+        },
+        "https": {
+          "$ref": "#/definitions/PortWhiteList"
+        },
+        "tcp": {
+          "$ref": "#/definitions/PortWhiteList"
+        },
+        "tls": {
+          "$ref": "#/definitions/PortWhiteList"
         }
       }
     },

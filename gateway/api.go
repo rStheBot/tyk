@@ -31,6 +31,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -367,6 +368,7 @@ func handleAddOrUpdate(keyName string, r *http.Request, isHashed bool) (interfac
 		}
 	} else {
 		newSession.DateCreated = time.Now()
+		keyName = generateToken(newSession.OrgID, keyName)
 	}
 
 	// Update our session object (create it)
@@ -375,7 +377,6 @@ func handleAddOrUpdate(keyName string, r *http.Request, isHashed bool) (interfac
 		// Only if it's NEW
 		switch r.Method {
 		case http.MethodPost:
-			keyName = generateToken(newSession.OrgID, keyName)
 			// It's a create, so lets hash the password
 			setSessionPassword(&newSession)
 		case http.MethodPut:
@@ -442,6 +443,9 @@ func handleGetDetail(sessionKey, apiID string, byHash bool) (interface{}, int) {
 		return apiError("Key not found"), http.StatusNotFound
 	}
 
+	mw := BaseMiddleware{Spec: spec}
+	mw.ApplyPolicies(&session)
+
 	quotaKey := QuotaKeyPrefix + storage.HashKey(sessionKey)
 	if byHash {
 		quotaKey = QuotaKeyPrefix + sessionKey
@@ -459,7 +463,7 @@ func handleGetDetail(sessionKey, apiID string, byHash bool) (interface{}, int) {
 	} else {
 		log.WithFields(logrus.Fields{
 			"prefix":  "api",
-			"key":     obfuscateKey(sessionKey),
+			"key":     obfuscateKey(quotaKey),
 			"message": err,
 			"status":  "ok",
 		}).Info("Can't retrieve key quota")
@@ -471,10 +475,16 @@ func handleGetDetail(sessionKey, apiID string, byHash bool) (interface{}, int) {
 			continue
 		}
 
-		limQuotaKey := QuotaKeyPrefix + id + "-" + storage.HashKey(sessionKey)
-		if byHash {
-			limQuotaKey = QuotaKeyPrefix + id + "-" + sessionKey
+		quotaScope := ""
+		if access.AllowanceScope != "" {
+			quotaScope = access.AllowanceScope + "-"
 		}
+
+		limQuotaKey := QuotaKeyPrefix + quotaScope + storage.HashKey(sessionKey)
+		if byHash {
+			limQuotaKey = QuotaKeyPrefix + quotaScope + sessionKey
+		}
+
 		if usedQuota, err := sessionManager.Store().GetRawKey(limQuotaKey); err == nil {
 			qInt, _ := strconv.Atoi(usedQuota)
 			remaining := access.Limit.QuotaMax - int64(qInt)
@@ -498,9 +508,6 @@ func handleGetDetail(sessionKey, apiID string, byHash bool) (interface{}, int) {
 		}
 	}
 
-	mw := BaseMiddleware{Spec: spec}
-	mw.ApplyPolicies(&session)
-
 	log.WithFields(logrus.Fields{
 		"prefix": "api",
 		"key":    obfuscateKey(sessionKey),
@@ -523,15 +530,22 @@ func handleGetAllKeys(filter, apiID string) (interface{}, int) {
 	}
 
 	sessions := sessionManager.Sessions(filter)
+	if filter != "" {
+		filterB64 := base64.StdEncoding.WithPadding(base64.NoPadding).EncodeToString([]byte(fmt.Sprintf(`{"org":"%s"`, filter)))
+		// Remove last 2 digits to look exact match
+		filterB64 = filterB64[0 : len(filterB64)-2]
+		orgIDB64Sessions := sessionManager.Sessions(filterB64)
+		sessions = append(sessions, orgIDB64Sessions...)
+	}
 
-	fixed_sessions := make([]string, 0)
+	fixedSessions := make([]string, 0)
 	for _, s := range sessions {
 		if !strings.HasPrefix(s, QuotaKeyPrefix) && !strings.HasPrefix(s, RateLimitKeyPrefix) {
-			fixed_sessions = append(fixed_sessions, s)
+			fixedSessions = append(fixedSessions, s)
 		}
 	}
 
-	sessionsObj := apiAllKeys{fixed_sessions}
+	sessionsObj := apiAllKeys{fixedSessions}
 
 	log.WithFields(logrus.Fields{
 		"prefix": "api",
@@ -916,7 +930,8 @@ func keyHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type PolicyUpdateObj struct {
-	Policy string `json:"policy"`
+	Policy        string   `json:"policy"`
+	ApplyPolicies []string `json:"apply_policies"`
 }
 
 func policyUpdateHandler(w http.ResponseWriter, r *http.Request) {
@@ -928,18 +943,18 @@ func policyUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if policRecord.Policy != "" {
+		policRecord.ApplyPolicies = append(policRecord.ApplyPolicies, policRecord.Policy)
+	}
+
 	keyName := mux.Vars(r)["keyName"]
-	apiID := r.URL.Query().Get("api_id")
-	obj, code := handleUpdateHashedKey(keyName, apiID, policRecord.Policy)
+	obj, code := handleUpdateHashedKey(keyName, policRecord.ApplyPolicies)
 
 	doJSONWrite(w, code, obj)
 }
 
-func handleUpdateHashedKey(keyName, apiID, policyId string) (interface{}, int) {
+func handleUpdateHashedKey(keyName string, applyPolicies []string) (interface{}, int) {
 	sessionManager := FallbackKeySesionManager
-	if spec := getApiSpec(apiID); spec != nil {
-		sessionManager = spec.SessionManager
-	}
 
 	sess, ok := sessionManager.SessionDetail(keyName, true)
 	if !ok {
@@ -954,7 +969,7 @@ func handleUpdateHashedKey(keyName, apiID, policyId string) (interface{}, int) {
 
 	// Set the policy
 	sess.LastUpdated = strconv.Itoa(int(time.Now().Unix()))
-	sess.SetPolicies(policyId)
+	sess.SetPolicies(applyPolicies...)
 
 	err := sessionManager.UpdateSession(keyName, &sess, 0, true)
 	if err != nil {
@@ -1217,6 +1232,9 @@ func createKeyHandler(w http.ResponseWriter, r *http.Request) {
 	newSession.LastUpdated = strconv.Itoa(int(time.Now().Unix()))
 	newSession.DateCreated = time.Now()
 
+	mw := BaseMiddleware{}
+	mw.ApplyPolicies(newSession)
+
 	if len(newSession.AccessRights) > 0 {
 		// reset API-level limit to nil if any has a zero-value
 		resetAPILimits(newSession.AccessRights)
@@ -1325,6 +1343,27 @@ func createKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}).Info("Generated new key: (", obfuscateKey(newKey), ")")
 
 	doJSONWrite(w, http.StatusOK, obj)
+}
+
+func previewKeyHandler(w http.ResponseWriter, r *http.Request) {
+	newSession := new(user.SessionState)
+	if err := json.NewDecoder(r.Body).Decode(newSession); err != nil {
+		log.WithFields(logrus.Fields{
+			"prefix": "api",
+			"status": "fail",
+			"err":    err,
+		}).Error("Key creation failed.")
+		doJSONWrite(w, http.StatusInternalServerError, apiError("Unmarshalling failed"))
+		return
+	}
+
+	newSession.LastUpdated = strconv.Itoa(int(time.Now().Unix()))
+	newSession.DateCreated = time.Now()
+
+	mw := BaseMiddleware{}
+	mw.ApplyPolicies(newSession)
+
+	doJSONWrite(w, http.StatusOK, newSession)
 }
 
 // NewClientRequest is an outward facing JSON object translated from osin OAuthClients

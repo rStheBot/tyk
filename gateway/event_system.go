@@ -121,8 +121,9 @@ func EventHandlerByName(handlerConf apidef.EventHandlerTriggerConfig, spec *APIS
 		}
 	case EH_CoProcessHandler:
 		if spec != nil {
-			if GlobalDispatcher == nil {
-				return nil, errors.New("no CP available")
+			dispatcher := loadedDrivers[spec.CustomMiddleware.Driver]
+			if dispatcher == nil {
+				return nil, errors.New("no plugin driver is available")
 			}
 			h := &CoProcessEventHandler{}
 			h.Spec = spec
@@ -169,7 +170,7 @@ func (l *LogMessageEventHandler) Init(handlerConf interface{}) error {
 	conf := handlerConf.(map[string]interface{})
 	l.prefix = conf["prefix"].(string)
 	l.logger = log
-	if runningTests {
+	if isRunningTests() {
 		logger, ok := conf["logger"]
 		if ok {
 			l.logger = logger.(*logrus.Logger)

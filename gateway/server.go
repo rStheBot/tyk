@@ -1,8 +1,7 @@
 package gateway
 
 import (
-	"crypto/tls"
-	"fmt"
+	"context"
 	"html/template"
 	"io/ioutil"
 	stdlog "log"
@@ -31,10 +30,9 @@ import (
 	uuid "github.com/satori/go.uuid"
 	"github.com/sirupsen/logrus"
 	logrus_syslog "github.com/sirupsen/logrus/hooks/syslog"
-	"golang.org/x/net/http2"
 	"rsc.io/letsencrypt"
 
-	"github.com/TykTechnologies/goagain"
+	"github.com/TykTechnologies/again"
 	gas "github.com/TykTechnologies/goautosocket"
 	"github.com/TykTechnologies/gorpc"
 	"github.com/TykTechnologies/tyk/apidef"
@@ -80,15 +78,14 @@ var (
 	policiesMu   sync.RWMutex
 	policiesByID = map[string]user.Policy{}
 
-	mainRouter    *mux.Router
-	controlRouter *mux.Router
-	LE_MANAGER    letsencrypt.Manager
-	LE_FIRSTRUN   bool
+	LE_MANAGER  letsencrypt.Manager
+	LE_FIRSTRUN bool
 
 	muNodeID sync.Mutex // guards NodeID
 	NodeID   string
 
-	runningTests = false
+	runningTestsMu sync.RWMutex
+	testMode       bool
 
 	// confPaths is the series of paths to try to use as config files. The
 	// first one to exist will be used. If none exists, a default config
@@ -110,18 +107,31 @@ const (
 	appName         = "tyk-gateway"
 )
 
-// setNodeID writes NodeID safely.
-func setNodeID(nodeID string) {
+// SetNodeID writes NodeID safely.
+func SetNodeID(nodeID string) {
 	muNodeID.Lock()
 	NodeID = nodeID
 	muNodeID.Unlock()
 }
 
-// getNodeID reads NodeID safely.
-func getNodeID() string {
+// GetNodeID reads NodeID safely.
+func GetNodeID() string {
 	muNodeID.Lock()
 	defer muNodeID.Unlock()
 	return NodeID
+}
+
+func isRunningTests() bool {
+	runningTestsMu.RLock()
+	v := testMode
+	runningTestsMu.RUnlock()
+	return v
+}
+
+func setTestMode(v bool) {
+	runningTestsMu.Lock()
+	testMode = v
+	runningTestsMu.Unlock()
 }
 
 func getApiSpec(apiID string) *APISpec {
@@ -143,7 +153,7 @@ var purgeTicker = time.Tick(time.Second)
 var rpcPurgeTicker = time.Tick(10 * time.Second)
 
 // Create all globals and init connection handlers
-func setupGlobals() {
+func setupGlobals(ctx context.Context) {
 
 	reloadMu.Lock()
 	defer reloadMu.Unlock()
@@ -155,16 +165,13 @@ func setupGlobals() {
 			time.Duration(config.Global().DnsCache.CheckInterval)*time.Second)
 	}
 
-	mainRouter = mux.NewRouter()
-	controlRouter = mux.NewRouter()
-
 	if config.Global().EnableAnalytics && config.Global().Storage.Type != "redis" {
 		mainLog.Fatal("Analytics requires Redis Storage backend, please enable Redis in the tyk.conf file.")
 	}
 
 	// Initialise our Host Checker
 	healthCheckStore := storage.RedisCluster{KeyPrefix: "host-checker:"}
-	InitHostCheckManager(&healthCheckStore)
+	InitHostCheckManager(ctx, &healthCheckStore)
 
 	redisStore := storage.RedisCluster{KeyPrefix: "apikey-", HashKeys: config.Global().HashKeys}
 	FallbackKeySesionManager.Init(&redisStore)
@@ -201,17 +208,14 @@ func setupGlobals() {
 				go purger.PurgeLoop(rpcPurgeTicker)
 			})
 		}
+		go flushNetworkAnalytics(ctx)
 	}
 
 	// Load all the files that have the "error" prefix.
 	templatesDir := filepath.Join(config.Global().TemplatePath, "error*")
 	templates = template.Must(template.ParseGlob(templatesDir))
 
-	if config.Global().CoProcessOptions.EnableCoProcess {
-		if err := CoProcessInit(); err != nil {
-			log.WithField("prefix", "coprocess").Error(err)
-		}
-	}
+	CoProcessInit()
 
 	// Get the notifier ready
 	mainLog.Debug("Notifier will not work in hybrid mode")
@@ -264,10 +268,9 @@ func buildConnStr(resource string) string {
 
 func syncAPISpecs() (int, error) {
 	loader := APIDefinitionLoader{}
-
 	apisMu.Lock()
 	defer apisMu.Unlock()
-
+	var s []*APISpec
 	if config.Global().UseDBAppConfigs {
 		connStr := buildConnStr("/system/apis")
 		tmpSpecs, err := loader.FromDashboardService(connStr, config.Global().NodeSecret)
@@ -276,35 +279,43 @@ func syncAPISpecs() (int, error) {
 			return 0, err
 		}
 
-		apiSpecs = tmpSpecs
+		s = tmpSpecs
 
 		mainLog.Debug("Downloading API Configurations from Dashboard Service")
 	} else if config.Global().SlaveOptions.UseRPC {
 		mainLog.Debug("Using RPC Configuration")
 
 		var err error
-		apiSpecs, err = loader.FromRPC(config.Global().SlaveOptions.RPCKey)
+		s, err = loader.FromRPC(config.Global().SlaveOptions.RPCKey)
 		if err != nil {
 			return 0, err
 		}
 	} else {
-		apiSpecs = loader.FromDir(config.Global().AppPath)
+		s = loader.FromDir(config.Global().AppPath)
 	}
 
-	mainLog.Printf("Detected %v APIs", len(apiSpecs))
+	mainLog.Printf("Detected %v APIs", len(s))
 
 	if config.Global().AuthOverride.ForceAuthProvider {
-		for i := range apiSpecs {
-			apiSpecs[i].AuthProvider = config.Global().AuthOverride.AuthProvider
+		for i := range s {
+			s[i].AuthProvider = config.Global().AuthOverride.AuthProvider
 		}
 	}
 
 	if config.Global().AuthOverride.ForceSessionProvider {
-		for i := range apiSpecs {
-			apiSpecs[i].SessionProvider = config.Global().AuthOverride.SessionProvider
+		for i := range s {
+			s[i].SessionProvider = config.Global().AuthOverride.SessionProvider
 		}
 	}
-
+	var filter []*APISpec
+	for _, v := range s {
+		if err := v.Validate(); err != nil {
+			mainLog.Infof("Skipping loading spec:%q because it failed validation with error:%v", v.Name, err)
+			continue
+		}
+		filter = append(filter, v)
+	}
+	apiSpecs = filter
 	return len(apiSpecs), nil
 }
 
@@ -377,11 +388,21 @@ func controlAPICheckClientCertificate(certLevel string, next http.Handler) http.
 	})
 }
 
-// Set up default Tyk control API endpoints - these are global, so need to be added first
 func loadAPIEndpoints(muxer *mux.Router) {
 	hostname := config.Global().HostName
 	if config.Global().ControlAPIHostname != "" {
 		hostname = config.Global().ControlAPIHostname
+	}
+
+	if muxer == nil {
+		cp := config.Global().ControlAPIPort
+		muxer = defaultProxyMux.router(cp, "")
+		if muxer == nil {
+			if cp != 0 {
+				log.Error("Can't find control API router")
+			}
+			return
+		}
 	}
 
 	r := mux.NewRouter()
@@ -652,7 +673,7 @@ func rpcReloadLoop(rpcKey string) {
 
 var reloadMu sync.Mutex
 
-func doReload() {
+func DoReload() {
 	reloadMu.Lock()
 	defer reloadMu.Unlock()
 
@@ -679,23 +700,9 @@ func doReload() {
 			return
 		}
 	}
-
-	// We have updated specs, lets load those...
-	mainLog.Info("Preparing new router")
-	newRouter := mux.NewRouter()
-	if config.Global().HttpServerOptions.OverrideDefaults {
-		newRouter.SkipClean(config.Global().HttpServerOptions.SkipURLCleaning)
-	}
-
-	if config.Global().ControlAPIPort == 0 {
-		loadAPIEndpoints(newRouter)
-	}
-
-	loadGlobalApps(newRouter)
+	loadGlobalApps()
 
 	mainLog.Info("API reload complete")
-
-	mainRouter = newRouter
 }
 
 // startReloadChan and reloadDoneChan are used by the two reload loops
@@ -711,7 +718,7 @@ func reloadLoop(tick <-chan time.Time) {
 	<-tick
 	for range startReloadChan {
 		mainLog.Info("reload: initiating")
-		doReload()
+		DoReload()
 		mainLog.Info("reload: complete")
 
 		mainLog.Info("Initiating coprocess reload")
@@ -844,8 +851,8 @@ func setupLogger() {
 	}
 }
 
-func initialiseSystem() error {
-	if runningTests && os.Getenv("TYK_LOGLEVEL") == "" {
+func initialiseSystem(ctx context.Context) error {
+	if isRunningTests() && os.Getenv("TYK_LOGLEVEL") == "" {
 		// `go test` without TYK_LOGLEVEL set defaults to no log
 		// output
 		log.Level = logrus.ErrorLevel
@@ -866,7 +873,7 @@ func initialiseSystem() error {
 
 	mainLog.Infof("Tyk API Gateway %s", VERSION)
 
-	if !runningTests {
+	if !isRunningTests() {
 		globalConf := config.Config{}
 		if err := config.Load(confPaths, &globalConf); err != nil {
 			return err
@@ -905,7 +912,7 @@ func initialiseSystem() error {
 	rpc.Log = log
 	rpc.Instrument = instrument
 
-	setupGlobals()
+	setupGlobals(ctx)
 
 	globalConf := config.Global()
 
@@ -941,9 +948,8 @@ func initialiseSystem() error {
 	setupInstrumentation()
 
 	if config.Global().HttpServerOptions.UseLE_SSL {
-		go StartPeriodicStateBackup(&LE_MANAGER)
+		go StartPeriodicStateBackup(ctx, &LE_MANAGER)
 	}
-
 	return nil
 }
 
@@ -994,6 +1000,8 @@ func getGlobalStorageHandler(keyPrefix string, hashKeys bool) storage.Handler {
 }
 
 func Start() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cli.Init(VERSION, confPaths)
 	cli.Parse()
 	// Stop gateway process if not running in "start" mode:
@@ -1001,23 +1009,26 @@ func Start() {
 		os.Exit(0)
 	}
 
-	setNodeID("solo-" + uuid.NewV4().String())
+	SetNodeID("solo-" + uuid.NewV4().String())
 
-	if err := initialiseSystem(); err != nil {
+	if err := initialiseSystem(ctx); err != nil {
 		mainLog.Fatalf("Error initialising system: %v", err)
 	}
 
-	var controlListener net.Listener
+	if config.Global().ControlAPIPort == 0 {
+		mainLog.Warn("The control_api_port should be changed for production")
+	}
+	setupPortsWhitelist()
 
 	onFork := func() {
 		mainLog.Warning("PREPARING TO FORK")
 
-		if controlListener != nil {
-			if err := controlListener.Close(); err != nil {
-				mainLog.Error("Control listen handler exit: ", err)
-			}
-			mainLog.Info("Control listen closed")
-		}
+		// if controlListener != nil {
+		// 	if err := controlListener.Close(); err != nil {
+		// 		mainLog.Error("Control listen handler exit: ", err)
+		// 	}
+		// 	mainLog.Info("Control listen closed")
+		// }
 
 		if config.Global().UseDBAppConfigs {
 			mainLog.Info("Stopping heartbeat")
@@ -1026,23 +1037,13 @@ func Start() {
 			time.Sleep(10 * time.Second)
 
 			os.Setenv("TYK_SERVICE_NONCE", ServiceNonce)
-			os.Setenv("TYK_SERVICE_NODEID", getNodeID())
+			os.Setenv("TYK_SERVICE_NODEID", GetNodeID())
 		}
 	}
-
-	listener, goAgainErr := goagain.Listener(onFork)
-
-	if controlAPIPort := config.Global().ControlAPIPort; controlAPIPort > 0 {
-		var err error
-		if controlListener, err = generateListener(controlAPIPort); err != nil {
-			mainLog.Fatalf("Error starting control API listener: %s", err)
-		} else {
-			mainLog.Info("Starting control API listener: ", controlListener, err, controlAPIPort)
-		}
-	} else {
-		mainLog.Warn("The control_api_port should be changed for production")
+	err := again.ListenFrom(&defaultProxyMux.again, onFork)
+	if err != nil {
+		mainLog.Errorf("Initializing again %s", err)
 	}
-
 	checkup.Run(config.Global())
 	if tr := config.Global().Tracer; tr.Enabled {
 		trace.SetupTracing(tr.Name, tr.Options)
@@ -1083,36 +1084,21 @@ func Start() {
 		runtime.SetMutexProfileFraction(1)
 	}
 
-	if goAgainErr != nil {
-		var err error
-		if listener, err = generateListener(config.Global().ListenPort); err != nil {
-			mainLog.Fatalf("Error starting listener: %s", err)
-		}
+	// TODO: replace goagain with something that support multiple listeners
+	// Example: https://gravitational.com/blog/golang-ssh-bastion-graceful-restarts/
+	startServer()
 
-		listen(listener, controlListener, goAgainErr)
-	} else {
-		listen(listener, controlListener, nil)
-
-		// Kill the parent, now that the child has started successfully.
-		mainLog.Debug("KILLING PARENT PROCESS")
-		if err := goagain.Kill(); err != nil {
-			mainLog.Fatalln(err)
+	if again.Child() {
+		// This is a child process, we need to murder the parent now
+		if err := again.Kill(); err != nil {
+			mainLog.Fatal(err)
 		}
 	}
-
-	// Block the main goroutine awaiting signals.
-	if _, err := goagain.Wait(listener); err != nil {
-		mainLog.Fatalln(err)
-	}
-
-	// Do whatever's necessary to ensure a graceful exit
-	// In this case, we'll simply stop listening and wait one second.
-	if err := listener.Close(); err != nil {
-		mainLog.Error("Listen handler exit: ", err)
-	}
-
+	again.Wait(&defaultProxyMux.again)
 	mainLog.Info("Stop signal received.")
-
+	if err := defaultProxyMux.again.Close(); err != nil {
+		mainLog.Error("Closing listeners: ", err)
+	}
 	// stop analytics workers
 	if config.Global().EnableAnalytics && analytics.Store == nil {
 		analytics.Stop()
@@ -1174,10 +1160,6 @@ func start() {
 		DefaultQuotaStore.Init(getGlobalStorageHandler("orgkey.", false))
 	}
 
-	if config.Global().ControlAPIPort == 0 {
-		loadAPIEndpoints(mainRouter)
-	}
-
 	// Start listening for reload messages
 	if !config.Global().SuppressRedisSignalReload {
 		go startPubSubLoop()
@@ -1200,48 +1182,6 @@ func start() {
 	// interval counts from the start of one reload to the next.
 	go reloadLoop(time.Tick(time.Second))
 	go reloadQueueLoop()
-}
-
-func generateListener(listenPort int) (net.Listener, error) {
-	listenAddress := config.Global().ListenAddress
-
-	targetPort := listenAddress + ":" + strconv.Itoa(listenPort)
-
-	if httpServerOptions := config.Global().HttpServerOptions; httpServerOptions.UseSSL {
-		mainLog.Info("--> Using SSL (https)")
-
-		tlsConfig := tls.Config{
-			GetCertificate:     dummyGetCertificate,
-			ServerName:         httpServerOptions.ServerName,
-			MinVersion:         httpServerOptions.MinVersion,
-			ClientAuth:         tls.NoClientCert,
-			InsecureSkipVerify: httpServerOptions.SSLInsecureSkipVerify,
-			CipherSuites:       getCipherAliases(httpServerOptions.Ciphers),
-		}
-
-		if httpServerOptions.EnableHttp2 {
-			tlsConfig.NextProtos = append(tlsConfig.NextProtos, http2.NextProtoTLS)
-		}
-
-		tlsConfig.GetConfigForClient = getTLSConfigForClient(&tlsConfig, listenPort)
-
-		return tls.Listen("tcp", targetPort, &tlsConfig)
-	} else if config.Global().HttpServerOptions.UseLE_SSL {
-
-		mainLog.Info("--> Using SSL LE (https)")
-
-		GetLEState(&LE_MANAGER)
-
-		conf := tls.Config{
-			GetCertificate: LE_MANAGER.GetCertificate,
-		}
-		conf.GetConfigForClient = getTLSConfigForClient(&conf, listenPort)
-
-		return tls.Listen("tcp", targetPort, &conf)
-	} else {
-		mainLog.WithField("port", targetPort).Info("--> Standard listener (http)")
-		return net.Listen("tcp", targetPort)
-	}
 }
 
 func dashboardServiceInit() {
@@ -1280,160 +1220,51 @@ func startDRL() {
 	startRateLimitNotifications()
 }
 
-// mainHandler's only purpose is to allow mainRouter to be dynamically replaced
-type mainHandler struct{}
-
-func (_ mainHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	reloadMu.Lock()
-	AddNewRelicInstrumentation(NewRelicApplication, mainRouter)
-	reloadMu.Unlock()
-
-	// make request body to be nopCloser and re-readable before serve it through chain of middlewares
-	nopCloseRequestBody(r)
-	mainRouter.ServeHTTP(w, r)
+func setupPortsWhitelist() {
+	// setup listen and control ports as whitelisted
+	globalConf := config.Global()
+	w := globalConf.PortWhiteList
+	if w == nil {
+		w = make(map[string]config.PortWhiteList)
+	}
+	protocol := "http"
+	if globalConf.HttpServerOptions.UseSSL {
+		protocol = "https"
+	}
+	ls := config.PortWhiteList{}
+	if v, ok := w[protocol]; ok {
+		ls = v
+	}
+	ls.Ports = append(ls.Ports, globalConf.ListenPort)
+	if globalConf.ControlAPIPort != 0 {
+		ls.Ports = append(ls.Ports, globalConf.ControlAPIPort)
+	}
+	w[protocol] = ls
+	globalConf.PortWhiteList = w
+	config.SetGlobal(globalConf)
 }
 
-func listen(listener, controlListener net.Listener, err error) {
+func startServer() {
+	// Ensure that Control listener and default http listener running on first start
+	muxer := &proxyMux{}
 
-	readTimeout := defReadTimeout
-	writeTimeout := defWriteTimeout
+	router := mux.NewRouter()
+	loadAPIEndpoints(router)
+	muxer.setRouter(config.Global().ControlAPIPort, "", router)
 
-	targetPort := config.Global().ListenAddress + ":" + strconv.Itoa(config.Global().ListenPort)
-	if config.Global().HttpServerOptions.ReadTimeout > 0 {
-		readTimeout = time.Duration(config.Global().HttpServerOptions.ReadTimeout) * time.Second
+	if muxer.router(config.Global().ListenPort, "") == nil {
+		muxer.setRouter(config.Global().ListenPort, "", mux.NewRouter())
 	}
 
-	if config.Global().HttpServerOptions.WriteTimeout > 0 {
-		writeTimeout = time.Duration(config.Global().HttpServerOptions.WriteTimeout) * time.Second
-	}
+	defaultProxyMux.swap(muxer)
 
-	if config.Global().ControlAPIPort > 0 {
-		loadAPIEndpoints(controlRouter)
-	}
-
-	// Error not empty if handle reload when SIGUSR2 is received
-	if err != nil {
-		// Listen on a TCP or a UNIX domain socket (TCP here).
-		mainLog.Info("Setting up Server")
-
-		// handle dashboard registration and nonces if available
-		handleDashboardRegistration()
-
-		// Use a custom server so we can control tves
-		if config.Global().HttpServerOptions.OverrideDefaults {
-			mainRouter.SkipClean(config.Global().HttpServerOptions.SkipURLCleaning)
-
-			mainLog.Infof("Custom gateway started (%s)", VERSION)
-
-			mainLog.Warning("HTTP Server Overrides detected, this could destabilise long-running http-requests")
-
-			s := &http.Server{
-				Addr:         targetPort,
-				ReadTimeout:  readTimeout,
-				WriteTimeout: writeTimeout,
-				Handler:      mainHandler{},
-			}
-
-			if config.Global().CloseConnections {
-				s.SetKeepAlivesEnabled(false)
-			}
-
-			// Accept connections in a new goroutine.
-			go s.Serve(listener)
-
-			if controlListener != nil {
-				cs := &http.Server{
-					ReadTimeout:  readTimeout,
-					WriteTimeout: writeTimeout,
-					Handler:      controlRouter,
-				}
-				go cs.Serve(controlListener)
-			}
-		} else {
-			mainLog.Printf("Gateway started")
-
-			s := &http.Server{Handler: mainHandler{}}
-			if config.Global().CloseConnections {
-				s.SetKeepAlivesEnabled(false)
-			}
-
-			go s.Serve(listener)
-
-			if controlListener != nil {
-				go http.Serve(controlListener, controlRouter)
-			}
-		}
-	} else {
-		// handle dashboard registration and nonces if available
-		nonce := os.Getenv("TYK_SERVICE_NONCE")
-		nodeID := os.Getenv("TYK_SERVICE_NODEID")
-		if nonce == "" || nodeID == "" {
-			mainLog.Warning("No nonce found, re-registering")
-			handleDashboardRegistration()
-
-		} else {
-			setNodeID(nodeID)
-			ServiceNonce = nonce
-			mainLog.Info("State recovered")
-
-			os.Setenv("TYK_SERVICE_NONCE", "")
-			os.Setenv("TYK_SERVICE_NODEID", "")
-		}
-
-		if config.Global().UseDBAppConfigs {
-			dashboardServiceInit()
-			go DashService.StartBeating()
-		}
-
-		if config.Global().HttpServerOptions.OverrideDefaults {
-			mainRouter.SkipClean(config.Global().HttpServerOptions.SkipURLCleaning)
-
-			mainLog.Warning("HTTP Server Overrides detected, this could destabilise long-running http-requests")
-			s := &http.Server{
-				Addr:         ":" + targetPort,
-				ReadTimeout:  readTimeout,
-				WriteTimeout: writeTimeout,
-				Handler:      mainHandler{},
-			}
-
-			if config.Global().CloseConnections {
-				s.SetKeepAlivesEnabled(false)
-			}
-
-			mainLog.Info("Custom gateway started")
-			go s.Serve(listener)
-
-			if controlListener != nil {
-				cs := &http.Server{
-					ReadTimeout:  readTimeout,
-					WriteTimeout: writeTimeout,
-					Handler:      controlRouter,
-				}
-				go cs.Serve(controlListener)
-			}
-		} else {
-			mainLog.Printf("Gateway resumed (%s)", VERSION)
-
-			s := &http.Server{Handler: mainHandler{}}
-			if config.Global().CloseConnections {
-				s.SetKeepAlivesEnabled(false)
-			}
-
-			go s.Serve(listener)
-
-			if controlListener != nil {
-				mainLog.Info("Control API listener started: ", controlListener, controlRouter)
-
-				go http.Serve(controlListener, controlRouter)
-			}
-		}
-
-		mainLog.Info("Resuming on", listener.Addr())
-	}
+	// handle dashboard registration and nonces if available
+	handleDashboardRegistration()
 
 	// at this point NodeID is ready to use by DRL
 	drlOnce.Do(startDRL)
 
+	mainLog.Infof("Tyk Gateway started (%s)", VERSION)
 	address := config.Global().ListenAddress
 	if config.Global().ListenAddress == "" {
 		address = "(open interface)"
@@ -1441,12 +1272,7 @@ func listen(listener, controlListener net.Listener, err error) {
 	mainLog.Info("--> Listening on address: ", address)
 	mainLog.Info("--> Listening on port: ", config.Global().ListenPort)
 	mainLog.Info("--> PID: ", hostDetails.PID)
-
-	mainRouter.HandleFunc("/"+config.Global().HealthCheckEndpointName, func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Hello Tiki")
-	})
-
 	if !rpc.IsEmergencyMode() {
-		doReload()
+		DoReload()
 	}
 }

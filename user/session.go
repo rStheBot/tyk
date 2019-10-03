@@ -34,7 +34,7 @@ type APILimit struct {
 	QuotaRenews        int64   `json:"quota_renews" msg:"quota_renews"`
 	QuotaRemaining     int64   `json:"quota_remaining" msg:"quota_remaining"`
 	QuotaRenewalRate   int64   `json:"quota_renewal_rate" msg:"quota_renewal_rate"`
-	SetByPolicy        bool    `json:"set_by_policy" msg:"set_by_policy"`
+	SetBy              string  `json:"-" msg:"-"`
 }
 
 // AccessDefinition defines which versions of an API a key has access to
@@ -44,6 +44,8 @@ type AccessDefinition struct {
 	Versions    []string     `json:"versions" msg:"versions"`
 	AllowedURLs []AccessSpec `bson:"allowed_urls" json:"allowed_urls" msg:"allowed_urls"` // mapped string MUST be a valid regex
 	Limit       *APILimit    `json:"limit" msg:"limit"`
+
+	AllowanceScope string `json:"allowance_scope" msg:"allowance_scope"`
 }
 
 // SessionState objects represent a current API session, mainly used for rate limiting.
@@ -147,6 +149,26 @@ func (s *SessionState) PolicyIDs() []string {
 func (s *SessionState) SetPolicies(ids ...string) {
 	s.ApplyPolicyID = ""
 	s.ApplyPolicies = ids
+}
+
+// PoliciesEqualTo compares and returns true if passed slice if IDs contains only current ApplyPolicies
+func (s *SessionState) PoliciesEqualTo(ids []string) bool {
+	if len(s.ApplyPolicies) != len(ids) {
+		return false
+	}
+
+	polIDMap := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		polIDMap[id] = true
+	}
+
+	for _, curID := range s.ApplyPolicies {
+		if !polIDMap[curID] {
+			return false
+		}
+	}
+
+	return true
 }
 
 // GetQuotaLimitByAPIID return quota max, quota remaining, quota renewal rate and quota renews for the given session

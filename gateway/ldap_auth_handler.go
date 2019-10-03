@@ -89,6 +89,12 @@ func (l *LDAPStorageHandler) GetKey(filter string) (string, error) {
 	return "", nil
 }
 
+func (r *LDAPStorageHandler) GetMultiKey(keyNames []string) ([]string, error) {
+	log.Warning("Not implementated")
+
+	return nil, nil
+}
+
 func (l *LDAPStorageHandler) GetRawKey(filter string) (string, error) {
 	log.Warning("Not implementated")
 
@@ -135,6 +141,11 @@ func (l *LDAPStorageHandler) SetRawKey(cn, session string, timeout int64) error 
 
 func (l *LDAPStorageHandler) DeleteKey(cn string) bool {
 	return l.notifyReadOnly()
+}
+
+func (r *LDAPStorageHandler) DeleteAllKeys() bool {
+	log.Warning("Not implementated")
+	return false
 }
 
 func (l *LDAPStorageHandler) DeleteRawKey(cn string) bool {

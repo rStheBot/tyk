@@ -31,16 +31,22 @@
 			"versionExact": "v0.11.4"
 		},
 		{
+			"checksumSHA1": "5372siuLhg4uYim2FHz057TwWrs=",
+			"path": "github.com/TykTechnologies/again",
+			"revision": "6ad301e7eaed6b8269b77e8df301e8d2e2130071",
+			"revisionTime": "2019-08-05T13:36:18Z"
+		},
+		{
 			"checksumSHA1": "j5NnY7tyNCx+Y5VrAMxKFqPPGWc=",
 			"path": "github.com/TykTechnologies/concurrent-map",
 			"revision": "7de59d53fd5c30afb681bfcfe58842d2e14136bd",
 			"revisionTime": "2016-09-08T20:14:09Z"
 		},
 		{
-			"checksumSHA1": "x4O2rG2+8ioJ0ZTQBiib50NAzQY=",
+			"checksumSHA1": "xFb5HtnQU4DJ8M5Dwnyii9hyuyM=",
 			"path": "github.com/TykTechnologies/drl",
-			"revision": "36df9d02f946013b2b4ddaf813770256272c375a",
-			"revisionTime": "2017-10-28T14:04:03Z"
+			"revision": "cc541aa8e3e1734e4fac8e1301c88546066e804a",
+			"revisionTime": "2019-09-05T19:19:55Z"
 		},
 		{
 			"checksumSHA1": "HqPKaziJ4igBSUmO1i7W0cRkpVA=",
@@ -61,10 +67,10 @@
 			"revisionTime": "2017-02-22T15:40:38Z"
 		},
 		{
-			"checksumSHA1": "pk+Fj0KfcNdwugEfI9657E7flgI=",
+			"checksumSHA1": "HdyEg0NlrJck03XxYhfAHX16ArA=",
 			"path": "github.com/TykTechnologies/gorpc",
-			"revision": "2fd6ca5242c4dbee5ab151010ee844f3fb5507a8",
-			"revisionTime": "2018-09-28T16:00:09Z"
+			"revision": "f38605581dbf0f37ee4f277a00da77cd8db16e5a",
+			"revisionTime": "2019-09-25T17:50:35Z"
 		},
 		{
 			"checksumSHA1": "FEq3KG6Kgarh8P5XIUx3bH13zDM=",
@@ -163,6 +169,12 @@
 			"path": "github.com/clbanning/mxj",
 			"revision": "1cda74d18ebbb04f525b355309c16d594e1f8f77",
 			"revisionTime": "2017-06-20T21:51:35Z"
+		},
+		{
+			"checksumSHA1": "CSPbwbyzqA6sfORicn4HFtIhF/c=",
+			"path": "github.com/davecgh/go-spew/spew",
+			"revision": "d8f796af33cc11cb798c1aaeb27a4ebc5099927d",
+			"revisionTime": "2018-08-30T19:11:22Z"
 		},
 		{
 			"checksumSHA1": "2Fy1Y6Z3lRRX1891WF/+HT4XS2I=",
@@ -563,10 +575,22 @@
 			"revisionTime": "2015-11-19T09:14:14Z"
 		},
 		{
+			"checksumSHA1": "z9escnY1HdbFBLrJozvQ3lygt1E=",
+			"path": "github.com/pires/go-proxyproto",
+			"revision": "2c19fd512994b0cd3d16abb295029bf257d48a56",
+			"revisionTime": "2019-06-15T16:34:42Z"
+		},
+		{
 			"checksumSHA1": "ynJSWoF6v+3zMnh9R0QmmG6iGV8=",
 			"path": "github.com/pkg/errors",
 			"revision": "bfd5150e4e41705ded2129ec33379de1cb90b513",
 			"revisionTime": "2017-02-27T22:00:37Z"
+		},
+		{
+			"checksumSHA1": "LuFv4/jlrmFNnDb/5SCSEPAM9vU=",
+			"path": "github.com/pmezard/go-difflib/difflib",
+			"revision": "5d4384ee4fb2527b0a1256a821ebfc92f91efefc",
+			"revisionTime": "2018-12-26T10:54:42Z"
 		},
 		{
 			"checksumSHA1": "D+eX5lLgOgij1Hs7NO10OLdUVZo=",
@@ -681,6 +705,12 @@
 			"path": "github.com/square/go-jose/json",
 			"revision": "63d7cfa0284d0bc9bf41d58f802037559c45ce8f",
 			"revisionTime": "2016-10-27T01:03:14Z"
+		},
+		{
+			"checksumSHA1": "QELcZ0cB4PrpjIoeESHQCGDpMsk=",
+			"path": "github.com/stretchr/testify/assert",
+			"revision": "85f2b59c4459e5bf57488796be8c3667cb8246d6",
+			"revisionTime": "2018-07-16T14:42:29Z"
 		},
 		{
 			"checksumSHA1": "9W312a36vZ/J33+kGZb4SsHYNEQ=",
@@ -1490,6 +1520,10 @@
 			"path": "gopkg.in/yaml.v2",
 			"revision": "51d6538a90f86fe93ac480b35f37b2be17fef232",
 			"revisionTime": "2018-11-15T11:05:04Z"
+		},
+		{
+			"path": "https://github.com/TykTechnologies/drl.git",
+			"revision": ""
 		}
 	],
 	"rootPath": "github.com/TykTechnologies/tyk"

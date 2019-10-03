@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 
 	"rsc.io/letsencrypt"
@@ -80,7 +81,7 @@ func onLESSLStatusReceivedHandler(payload string) {
 	log.Debug("Received LE data: ", serverData)
 
 	// not great
-	if serverData.ID != getNodeID() {
+	if serverData.ID != GetNodeID() {
 		log.Info("Received Redis LE change notification!")
 		GetLEState(&LE_MANAGER)
 	}
@@ -89,14 +90,17 @@ func onLESSLStatusReceivedHandler(payload string) {
 
 }
 
-func StartPeriodicStateBackup(m *letsencrypt.Manager) {
-	for range m.Watch() {
-		// First run will call a cache save that overwrites with null data
-		if LE_FIRSTRUN {
-			log.Info("[SSL] State change detected, storing")
-			StoreLEState(m)
+func StartPeriodicStateBackup(ctx context.Context, m *letsencrypt.Manager) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.Watch():
+			if LE_FIRSTRUN {
+				log.Info("[SSL] State change detected, storing")
+				StoreLEState(m)
+			}
+			LE_FIRSTRUN = true
 		}
-
-		LE_FIRSTRUN = true
 	}
 }

@@ -19,9 +19,10 @@ import (
 
 	sprig "gopkg.in/Masterminds/sprig.v2"
 
+	"github.com/gorilla/mux"
+
 	"github.com/TykTechnologies/tyk/headers"
 	"github.com/TykTechnologies/tyk/rpc"
-	"github.com/gorilla/mux"
 
 	circuit "github.com/rubyist/circuitbreaker"
 	"github.com/sirupsen/logrus"
@@ -182,9 +183,10 @@ type APISpec struct {
 	GlobalConfig             config.Config
 	OrgHasNoSession          bool
 
-	middlewareChain http.Handler
+	middlewareChain *ChainObject
 
 	shouldRelease bool
+	network       NetworkStats
 }
 
 // Release re;leases all resources associated with API spec
@@ -206,6 +208,29 @@ func (s *APISpec) Release() {
 	}
 
 	// release all other resources associated with spec
+}
+
+// Validate returns nil if s is a valid spec and an error stating why the spec is not valid.
+func (s *APISpec) Validate() error {
+	// For tcp services we need to make sure we can bind to the port.
+	switch s.Protocol {
+	case "tcp", "tls":
+		return s.validateTCP()
+	default:
+		return s.validateHTTP()
+	}
+}
+
+func (s *APISpec) validateTCP() error {
+	if s.ListenPort == 0 {
+		return errors.New("missing listening port")
+	}
+	return nil
+}
+
+func (s *APISpec) validateHTTP() error {
+	// NOOP
+	return nil
 }
 
 // APIDefinitionLoader will load an Api definition from a storage
@@ -248,8 +273,12 @@ func (a APIDefinitionLoader) MakeSpec(def *apidef.APIDefinition, logger *logrus.
 	// Add any new session managers or auth handlers here
 	spec.AuthManager = &DefaultAuthorisationManager{}
 
-	spec.SessionManager = &DefaultSessionManager{}
-	spec.OrgSessionManager = &DefaultSessionManager{}
+	spec.SessionManager = &DefaultSessionManager{
+		orgID: spec.OrgID,
+	}
+	spec.OrgSessionManager = &DefaultSessionManager{
+		orgID: spec.OrgID,
+	}
 
 	spec.GlobalConfig = config.Global()
 
@@ -309,8 +338,8 @@ func (a APIDefinitionLoader) FromDashboardService(endpoint, secret string) ([]*A
 	}
 
 	newRequest.Header.Set("authorization", secret)
-	log.Debug("Using: NodeID: ", getNodeID())
-	newRequest.Header.Set(headers.XTykNodeID, getNodeID())
+	log.Debug("Using: NodeID: ", GetNodeID())
+	newRequest.Header.Set(headers.XTykNodeID, GetNodeID())
 
 	newRequest.Header.Set(headers.XTykNonce, ServiceNonce)
 
