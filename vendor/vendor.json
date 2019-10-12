@@ -3,6 +3,12 @@
 	"ignore": "test",
 	"package": [
 		{
+			"checksumSHA1": "J4DuUC1IZm8zjHPK+KEFbmawesE=",
+			"path": "github.com/DataDog/datadog-go/statsd",
+			"revision": "f6e76752dd64e7329d6b314f92a08748a78c2250",
+			"revisionTime": "2019-05-29T15:29:41Z"
+		},
+		{
 			"checksumSHA1": "9BfDgevpBgdiP4B6DT9SvcuVyLs=",
 			"path": "github.com/Jeffail/gabs",
 			"revision": "2a3aa15961d5fee6047b8151b67ac2f08ba2c48c",
@@ -575,6 +581,12 @@
 			"revisionTime": "2015-11-19T09:14:14Z"
 		},
 		{
+			"checksumSHA1": "8U5pEHFpXd1/Klgp+C/a6TqWoh8=",
+			"path": "github.com/philhofer/fwd",
+			"revision": "bb6d471dc95d4fe11e432687f8b70ff496cf3136",
+			"revisionTime": "2017-09-05T21:21:22Z"
+		},
+		{
 			"checksumSHA1": "z9escnY1HdbFBLrJozvQ3lygt1E=",
 			"path": "github.com/pires/go-proxyproto",
 			"revision": "2c19fd512994b0cd3d16abb295029bf257d48a56",
@@ -711,6 +723,12 @@
 			"path": "github.com/stretchr/testify/assert",
 			"revision": "85f2b59c4459e5bf57488796be8c3667cb8246d6",
 			"revisionTime": "2018-07-16T14:42:29Z"
+		},
+		{
+			"checksumSHA1": "wboFqqIcSCeLKjDC4CKp7gGULT8=",
+			"path": "github.com/tinylib/msgp/msgp",
+			"revision": "490d90d0e69181d9cfedd28343d876cd361adcc3",
+			"revisionTime": "2019-10-14T03:46:48Z"
 		},
 		{
 			"checksumSHA1": "9W312a36vZ/J33+kGZb4SsHYNEQ=",
@@ -1142,6 +1160,18 @@
 			"revisionTime": "2017-03-01T11:38:50Z"
 		},
 		{
+			"checksumSHA1": "hurBRtR9I3o8NVs74ggKny2c4go=",
+			"path": "golang.org/x/xerrors",
+			"revision": "1b5146add8981d58be77b16229c0ff0f8bebd8c1",
+			"revisionTime": "2019-10-05T12:30:33Z"
+		},
+		{
+			"checksumSHA1": "LnzK4nslUNXBIfAt9PbXCJCvMdA=",
+			"path": "golang.org/x/xerrors/internal",
+			"revision": "1b5146add8981d58be77b16229c0ff0f8bebd8c1",
+			"revisionTime": "2019-10-05T12:30:33Z"
+		},
+		{
 			"checksumSHA1": "dU5fToNngC22+3DsebkdYv+T3jE=",
 			"path": "google.golang.org/genproto/googleapis/rpc/status",
 			"revision": "fa694d86fc64c7654a660f8908de4e879866748d",
@@ -1442,6 +1472,54 @@
 			"revisionTime": "2018-05-04T17:55:21Z",
 			"version": "v1.0.5",
 			"versionExact": "v1.0.5"
+		},
+		{
+			"checksumSHA1": "PS1y1Z1TMnVidzBofLGTbbYEZ2w=",
+			"path": "gopkg.in/DataDog/dd-trace-go.v1/ddtrace",
+			"revision": "c8d43ed9702794efc751dd8f7a74db45acefec90",
+			"revisionTime": "2019-09-19T13:17:36Z"
+		},
+		{
+			"checksumSHA1": "vyi7wIlPLR5ArG7vAQLhz+8wb38=",
+			"path": "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext",
+			"revision": "c8d43ed9702794efc751dd8f7a74db45acefec90",
+			"revisionTime": "2019-09-19T13:17:36Z"
+		},
+		{
+			"checksumSHA1": "1WNdenMc3itkajGUbMLltArGjWk=",
+			"path": "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/internal",
+			"revision": "c8d43ed9702794efc751dd8f7a74db45acefec90",
+			"revisionTime": "2019-09-19T13:17:36Z"
+		},
+		{
+			"checksumSHA1": "oMHXy1N8lIJQCAIGYiOaTn88nn8=",
+			"path": "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/opentracer",
+			"revision": "c8d43ed9702794efc751dd8f7a74db45acefec90",
+			"revisionTime": "2019-09-19T13:17:36Z"
+		},
+		{
+			"checksumSHA1": "eCGR+zl3GtIpMZi2uBtnCZB0ks0=",
+			"path": "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer",
+			"revision": "c8d43ed9702794efc751dd8f7a74db45acefec90",
+			"revisionTime": "2019-09-19T13:17:36Z"
+		},
+		{
+			"checksumSHA1": "IHMWDi/84wOxFBdeXNMSQlE6mr0=",
+			"path": "gopkg.in/DataDog/dd-trace-go.v1/internal/globalconfig",
+			"revision": "c8d43ed9702794efc751dd8f7a74db45acefec90",
+			"revisionTime": "2019-09-19T13:17:36Z"
+		},
+		{
+			"checksumSHA1": "Gd85Dk0rCnLDiCZ07KI6OWUlBwc=",
+			"path": "gopkg.in/DataDog/dd-trace-go.v1/internal/log",
+			"revision": "c8d43ed9702794efc751dd8f7a74db45acefec90",
+			"revisionTime": "2019-09-19T13:17:36Z"
+		},
+		{
+			"checksumSHA1": "cRXOKU788w6a5E7vq33tovGh77c=",
+			"path": "gopkg.in/DataDog/dd-trace-go.v1/internal/version",
+			"revision": "c8d43ed9702794efc751dd8f7a74db45acefec90",
+			"revisionTime": "2019-09-19T13:17:36Z"
 		},
 		{
 			"checksumSHA1": "EkdMN0N+5HzwrdFYID39Ufi5TVM=",
