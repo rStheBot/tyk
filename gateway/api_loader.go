@@ -447,8 +447,11 @@ func processSpec(spec *APISpec, apisByListen map[string]int,
 	logger.Debug("Setting Listen Path: ", spec.Proxy.ListenPath)
 
 	if trace.IsEnabled() {
+		logger.Debug("Enabling tracing for service: ", spec.Name)
+		trace.AddTracer(spec.Name)
 		chainDef.ThisHandler = trace.Handle(spec.Name, chain)
 	} else {
+		logger.Debug("Tracing is disabled; Skipping adding tracing for service: ", spec.Name)
 		chainDef.ThisHandler = chain
 	}
 	chainDef.ListenOn = spec.Proxy.ListenPath + "{rest:.*}"
