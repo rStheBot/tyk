@@ -1,4 +1,4 @@
-FROM golang:1.12
+FROM golang:bullseye
 LABEL io.tyk.vendor="Tyk" \
       version="1.0" \
       description="Base image for builds"
